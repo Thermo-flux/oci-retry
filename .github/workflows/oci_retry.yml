@@ -1,9 +1,8 @@
 name: OCI Ampere VM Auto-Retry
 on:
   schedule:
-    # Runs every 15 minutes 24/7 on GitHub's cloud servers
     - cron: '*/15 * * * *'
-  workflow_dispatch: # Allows manual trigger from GitHub UI anytime
+  workflow_dispatch:
 jobs:
   auto_retry:
     runs-on: ubuntu-latest
@@ -25,16 +24,53 @@ jobs:
           OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
         run: |
           mkdir -p ~/.oci
-          cat << EOF > ~/.oci/config
-          [DEFAULT]
-          user=${OCI_CLI_USER}
-          fingerprint=${OCI_CLI_FINGERPRINT}
-          key_file=~/.oci/oci_api_key.pem
-          tenancy=${OCI_CLI_TENANCY}
-          region=${OCI_CLI_REGION:-ap-hyderabad-1}
-          EOF
+          echo "[DEFAULT]" > ~/.oci/config
+          echo "user=${OCI_CLI_USER}" >> ~/.oci/config
+          echo "fingerprint=${OCI_CLI_FINGERPRINT}" >> ~/.oci/config
+          echo "key_file=~/.oci/oci_api_key.pem" >> ~/.oci/config
+          echo "tenancy=${OCI_CLI_TENANCY}" >> ~/.oci/config
+          echo "region=${OCI_CLI_REGION:-ap-hyderabad-1}" >> ~/.oci/config
           echo "$OCI_CLI_KEY_CONTENT" > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
       - name: Execute OCI Resource Manager Apply Job
         env:
           STACK_ID: ${{ secrets.STACK_ID }}
+        run: |
+          STACK_ID="${STACK_ID:-ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna}"
+          
+          echo "==============================================="
+          echo " Starting OCI Ampere VM Provisioning Retry"
+          echo "==============================================="
+          
+          JOB_ID=$(/home/runner/bin/oci resource-manager job create-apply-job \
+            --stack-id "$STACK_ID" \
+            --execution-plan-strategy "AUTO_APPROVED" \
+            --query "data.id" --raw-output 2>/dev/null || echo "")
+          if [ -z "$JOB_ID" ]; then
+            echo "  [!] Failed to trigger job (API rate limit or connection issue)."
+            exit 0
+          fi
+          echo "  [+] Job created (ID: $JOB_ID). Monitoring status..."
+          while true; do
+            sleep 15
+            JOB_STATE=$(/home/runner/bin/oci resource-manager job get --job-id "$JOB_ID" --query 'data."lifecycle-state"' --raw-output 2>/dev/null || echo "UNKNOWN")
+            case "$JOB_STATE" in
+              "SUCCEEDED")
+                echo ""
+                echo "==============================================="
+                echo " SUCCESS! Your Ampere VM has been provisioned!"
+                echo "==============================================="
+                exit 0
+                ;;
+              "FAILED"|"CANCELED")
+                echo "  [-] Job ended with status: $JOB_STATE (Out of capacity)."
+                exit 0
+                ;;
+              "IN_PROGRESS"|"ACCEPTED")
+                echo "  [...] Job still running ($JOB_STATE). Waiting..."
+                ;;
+              *)
+                echo "  [?] Status: '$JOB_STATE'. Checking again..."
+                ;;
+            esac
+          done
