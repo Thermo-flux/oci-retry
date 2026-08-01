@@ -68,6 +68,11 @@ jobs:
           JOB_ID=$(echo "$JOB_OUTPUT" | jq -r '.data.id // empty' 2>/dev/null || echo "")
 
           if [ -z "$JOB_ID" ]; then
+            if [[ "$JOB_OUTPUT" == *"TooManyRequests"* ]]; then
+              echo "  [!] Oracle API Rate Limit reached (HTTP 429: TooManyRequests)."
+              echo "  [i] The rate limit window will reset before the next scheduled run in 15 minutes."
+              exit 0
+            fi
             echo "  [!] Failed to trigger job. OCI response output:"
             echo "$JOB_OUTPUT"
             exit 1
