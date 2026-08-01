@@ -27,20 +27,32 @@ jobs:
           OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
           OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
           OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+          OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
+          SUPPRESS_LABEL_WARNING: "True"
         run: |
           mkdir -p ~/.oci
-          echo "[DEFAULT]" > ~/.oci/config
-          echo "user=${OCI_CLI_USER}" >> ~/.oci/config
-          echo "fingerprint=${OCI_CLI_FINGERPRINT}" >> ~/.oci/config
-          echo "key_file=~/.oci/oci_api_key.pem" >> ~/.oci/config
-          echo "tenancy=${OCI_CLI_TENANCY}" >> ~/.oci/config
-          echo "region=${OCI_CLI_REGION:-ap-hyderabad-1}" >> ~/.oci/config
-          echo "$OCI_CLI_KEY_CONTENT" > ~/.oci/oci_api_key.pem
+          
+          # Write private key with preserved newlines
+          printf "%s\n" "$OCI_CLI_KEY_CONTENT" > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
+
+          # Write OCI config file
+          cat << EOF > ~/.oci/config
+          [DEFAULT]
+          user=${OCI_CLI_USER}
+          fingerprint=${OCI_CLI_FINGERPRINT}
+          key_file=/home/runner/.oci/oci_api_key.pem
+          tenancy=${OCI_CLI_TENANCY}
+          region=${OCI_CLI_REGION:-ap-hyderabad-1}
+          EOF
+          
+          chmod 600 ~/.oci/config
 
       - name: Execute OCI Resource Manager Apply Job
         env:
           STACK_ID: ${{ secrets.STACK_ID }}
+          OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
+          SUPPRESS_LABEL_WARNING: "True"
         run: |
           STACK_ID="${STACK_ID:-ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna}"
           
@@ -48,7 +60,7 @@ jobs:
           echo " Starting OCI Ampere VM Provisioning Retry"
           echo "==============================================="
           
-          # Create apply job and capture exact response
+          # Create apply job and capture output
           JOB_OUTPUT=$(/home/runner/bin/oci resource-manager job create-apply-job \
             --stack-id "$STACK_ID" \
             --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
