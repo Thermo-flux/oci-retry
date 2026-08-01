@@ -1,20 +1,25 @@
 name: OCI Ampere VM Auto-Retry
+
 on:
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
+
 jobs:
   auto_retry:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Install OCI CLI
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-pip curl jq
           bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
           echo "/home/runner/bin" >> $GITHUB_PATH
+
       - name: Configure OCI CLI Credentials
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
@@ -32,6 +37,7 @@ jobs:
           echo "region=${OCI_CLI_REGION:-ap-hyderabad-1}" >> ~/.oci/config
           echo "$OCI_CLI_KEY_CONTENT" > ~/.oci/oci_api_key.pem
           chmod 600 ~/.oci/oci_api_key.pem
+
       - name: Execute OCI Resource Manager Apply Job
         env:
           STACK_ID: ${{ secrets.STACK_ID }}
@@ -42,18 +48,25 @@ jobs:
           echo " Starting OCI Ampere VM Provisioning Retry"
           echo "==============================================="
           
-          JOB_ID=$(/home/runner/bin/oci resource-manager job create-apply-job \
+          # Create apply job and capture exact response
+          JOB_OUTPUT=$(/home/runner/bin/oci resource-manager job create-apply-job \
             --stack-id "$STACK_ID" \
-            --execution-plan-strategy "AUTO_APPROVED" \
-            --query "data.id" --raw-output 2>/dev/null || echo "")
+            --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
+          
+          JOB_ID=$(echo "$JOB_OUTPUT" | jq -r '.data.id // empty' 2>/dev/null || echo "")
+
           if [ -z "$JOB_ID" ]; then
-            echo "  [!] Failed to trigger job (API rate limit or connection issue)."
-            exit 0
+            echo "  [!] Failed to trigger job. OCI response output:"
+            echo "$JOB_OUTPUT"
+            exit 1
           fi
+
           echo "  [+] Job created (ID: $JOB_ID). Monitoring status..."
+
           while true; do
             sleep 15
             JOB_STATE=$(/home/runner/bin/oci resource-manager job get --job-id "$JOB_ID" --query 'data."lifecycle-state"' --raw-output 2>/dev/null || echo "UNKNOWN")
+
             case "$JOB_STATE" in
               "SUCCEEDED")
                 echo ""
