@@ -15,16 +15,7 @@ def main():
     user      = os.environ.get('OCI_CLI_USER', '').strip().strip('"').strip("'")
     tenancy   = os.environ.get('OCI_CLI_TENANCY', '').strip().strip('"').strip("'")
     secret_fp = os.environ.get('OCI_CLI_FINGERPRINT', '').strip().strip('"').strip("'").lower()
-    region_env= os.environ.get('OCI_CLI_REGION', '').strip().strip('"').strip("'")
-    stack_id  = os.environ.get('STACK_ID', '').strip().strip('"').strip("'")
-
-    # Extract region from stack_id if present (e.g. ocid1.ormstack.oc1.ap-hyderabad-1...)
-    stack_region = ""
-    match = re.search(r'\.oc1\.([a-z0-9-]+)\.', stack_id)
-    if match:
-        stack_region = match.group(1)
-
-    region = region_env or stack_region or 'ap-hyderabad-1'
+    region    = (os.environ.get('OCI_CLI_REGION', '') or 'ap-hyderabad-1').strip().strip('"').strip("'")
 
     oci_dir  = os.path.expanduser('~/.oci')
     key_path = os.path.join(oci_dir, 'oci_api_key.pem')
@@ -51,10 +42,8 @@ def main():
         calc_fp = ':'.join(md5_hex[i:i+2] for i in range(0, len(md5_hex), 2)).lower()
     except Exception as e:
         print(f"  [!] Fingerprint calculation error: {e}")
-        sys.exit(1)
 
-    # Use calculated key fingerprint if secret_fp is empty or mismatched
-    active_fp = calc_fp
+    active_fp = secret_fp if secret_fp else calc_fp
 
     # Write config
     config = f"[DEFAULT]\nuser={user}\nfingerprint={active_fp}\nkey_file={key_path}\ntenancy={tenancy}\nregion={region}\n"
@@ -65,7 +54,8 @@ def main():
     print("=======================================================")
     print("  OCI Credential Verification Summary")
     print("=======================================================")
-    print(f"  [*] Key Fingerprint:     {calc_fp}")
+    print(f"  [*] Secret Fingerprint:  {secret_fp}")
+    print(f"  [*] Derived Fingerprint: {calc_fp}")
     print(f"  [*] Active Fingerprint:  {active_fp}")
     print(f"  [*] Region:              {region}")
     print(f"  [*] User OCID:           {user[:12]}...{user[-8:] if len(user)>20 else user}")
