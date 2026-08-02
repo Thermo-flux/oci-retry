@@ -44,40 +44,31 @@ jobs:
           echo " Starting OCI Ampere VM Provisioning Trigger"
           echo "================================================"
 
-          attempts=0
-          max_attempts=3
-          wait_sec=10
+          echo "  [*] Attempting OCI Resource Manager Apply Job..."
 
-          while [ $attempts -lt $max_attempts ]; do
-            attempts=$((attempts+1))
-            echo "  [*] Attempt $attempts/$max_attempts: Calling OCI Resource Manager API..."
+          JOB_OUTPUT=$(oci resource-manager job create-apply-job \
+            --stack-id "$STACK_ID" \
+            --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
 
-            JOB_OUTPUT=$(oci resource-manager job create-apply-job \
-              --stack-id "$STACK_ID" \
-              --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
+          JOB_ID=$(echo "$JOB_OUTPUT" | grep -o '"id": *"[^"]*"' | head -1 | sed 's/"id": *"//;s/"//')
 
-            JOB_ID=$(echo "$JOB_OUTPUT" | grep -o '"id": *"[^"]*"' | head -1 | sed 's/"id": *"//;s/"//')
+          if [ -n "$JOB_ID" ]; then
+            echo "================================================"
+            echo "  [+] SUCCESS! OCI Job Created!"
+            echo "  [+] Job ID: $JOB_ID"
+            echo "  [i] Oracle Cloud Resource Manager is provisioning your VM."
+            echo "================================================"
+            exit 0
+          fi
 
-            if [ -n "$JOB_ID" ]; then
-              echo "================================================"
-              echo "  [+] SUCCESS! OCI Job Created!"
-              echo "  [+] Job ID: $JOB_ID"
-              echo "  [i] Oracle Cloud Resource Manager is provisioning your VM."
-              echo "================================================"
-              exit 0
-            fi
+          if echo "$JOB_OUTPUT" | grep -q "TooManyRequests"; then
+            echo "  [!] Rate limited by OCI API (HTTP 429). Will retry on next 5-min scheduled run."
+            exit 0
+          fi
 
-            if echo "$JOB_OUTPUT" | grep -q "TooManyRequests"; then
-              echo "  [!] Rate limited by OCI API (HTTP 429). Retrying attempt in ${wait_sec}s..."
-              sleep $wait_sec
-              wait_sec=$((wait_sec * 2))
-              continue
-            fi
-
-            echo "  [!] OCI API Response:"
-            echo "$JOB_OUTPUT"
-            exit 1
-          done
-
-          echo "  [i] Finished batch attempts for this run. Waiting for next scheduled run."
-          exit 0
+          echo "  [!] OCI API Returned Error:"
+          echo "$JOB_OUTPUT"
+          echo "================================================"
+          echo "  [!] Provisioning failed with error above."
+          echo "================================================"
+          exit 1
