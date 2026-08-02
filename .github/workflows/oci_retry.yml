@@ -3,11 +3,11 @@ name: OCI Ampere VM Auto-Retry
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
 
 jobs:
   auto_retry:
-    runs-on: [self-hosted, Linux]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -15,14 +15,10 @@ jobs:
 
       - name: Install OCI CLI
         run: |
-          if command -v oci &> /dev/null; then
-            echo "OCI CLI already installed: $(oci --version 2>&1)"
-          else
-            echo "Installing OCI CLI..."
-            pip install oci-cli --quiet --no-warn-script-location || pip3 install oci-cli --quiet --no-warn-script-location
+          if ! command -v oci &> /dev/null; then
+            pip install oci-cli --quiet --no-warn-script-location
           fi
           echo "$HOME/.local/bin" >> $GITHUB_PATH
-          echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Configure OCI CLI Credentials
         env:
@@ -33,36 +29,7 @@ jobs:
           OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
           OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
           SUPPRESS_LABEL_WARNING: "True"
-        run: |
-          mkdir -p ~/.oci
-          # Use python3 to reliably write PEM key with correct newlines
-          python3 -c "
-import os, stat
-key = os.environ.get('OCI_CLI_KEY_CONTENT', '')
-key = key.strip().strip('\"').strip(\"'\").replace('\\\\n', '\\n').replace('\\n', '\\n')
-if not key.endswith('\\n'): key += '\\n'
-path = os.path.expanduser('~/.oci/oci_api_key.pem')
-open(path, 'w').write(key)
-os.chmod(path, 0o600)
-print('PEM key written:', len(key), 'bytes')
-"
-          REGION="${OCI_CLI_REGION:-ap-hyderabad-1}"
-          FP="${OCI_CLI_FINGERPRINT}"
-          USER_OCID="${OCI_CLI_USER}"
-          TENANCY="${OCI_CLI_TENANCY}"
-          KEY_FILE="$HOME/.oci/oci_api_key.pem"
-
-          printf '[DEFAULT]\nuser=%s\nfingerprint=%s\nkey_file=%s\ntenancy=%s\nregion=%s\n' \
-            "$USER_OCID" "$FP" "$KEY_FILE" "$TENANCY" "$REGION" > ~/.oci/config
-          chmod 600 ~/.oci/config
-
-          echo "============================================="
-          echo "  OCI Config written successfully"
-          echo "  Fingerprint: $FP"
-          echo "  Region:      $REGION"
-          echo "============================================="
-          # Verify PEM is valid
-          openssl rsa -in ~/.oci/oci_api_key.pem -check -noout 2>&1 && echo "  PEM key: VALID" || echo "  PEM key: INVALID - check OCI_CLI_KEY_CONTENT secret"
+        run: python3 scripts/setup_oci.py
 
       - name: Execute OCI Resource Manager Apply Job
         env:
@@ -71,9 +38,7 @@ print('PEM key written:', len(key), 'bytes')
           SUPPRESS_LABEL_WARNING: "True"
         run: |
           STACK_ID="${STACK_ID:-ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna}"
-          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
-          OCI_BIN=$(command -v oci 2>/dev/null || echo "oci")
-
+          
           echo "================================================"
           echo " Starting OCI Ampere VM Provisioning Trigger"
           echo "================================================"
@@ -86,7 +51,7 @@ print('PEM key written:', len(key), 'bytes')
             attempts=$((attempts+1))
             echo "  [*] Attempt $attempts/$max_attempts: Creating OCI Resource Manager Apply Job..."
 
-            JOB_OUTPUT=$($OCI_BIN resource-manager job create-apply-job \
+            JOB_OUTPUT=$(oci resource-manager job create-apply-job \
               --stack-id "$STACK_ID" \
               --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
 
