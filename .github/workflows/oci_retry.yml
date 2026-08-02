@@ -31,40 +31,57 @@ jobs:
           SUPPRESS_LABEL_WARNING: "True"
         run: |
           mkdir -p ~/.oci
-          python3 -c "import os; raw = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip().replace('\\\\n', '\n').replace('\\n', '\n'); txt = raw + ('\n' if not raw.endswith('\n') else ''); open(os.path.expanduser('~/.oci/oci_api_key.pem'), 'w').write(txt)"
-          chmod 600 ~/.oci/oci_api_key.pem
+          python3 - << 'PY'
+import os, subprocess, hashlib
 
-          cat << EOF > ~/.oci/config
-          [DEFAULT]
-          user=${OCI_CLI_USER}
-          fingerprint=${OCI_CLI_FINGERPRINT}
-          key_file=/home/runner/.oci/oci_api_key.pem
-          tenancy=${OCI_CLI_TENANCY}
-          region=${OCI_CLI_REGION:-ap-hyderabad-1}
-          EOF
-          
-          chmod 600 ~/.oci/config
+key_path = os.path.expanduser('~/.oci/oci_api_key.pem')
+raw_key = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip().strip('"').strip("'").replace('\\\\n', '\n').replace('\\n', '\n')
+if not raw_key.endswith('\n'):
+    raw_key += '\n'
 
-          CALC_FINGERPRINT=$(openssl rsa -in ~/.oci/oci_api_key.pem -pubout -outform DER 2>/dev/null | openssl md5 -c | awk '{print $NF}' | sed -e 's/^MD5=//i' -e 's/^MD5//i')
-          USE_FINGERPRINT="${CALC_FINGERPRINT:-${OCI_CLI_FINGERPRINT}}"
+with open(key_path, 'w') as f:
+    f.write(raw_key)
+os.chmod(key_path, 0o600)
 
-          cat << EOF > ~/.oci/config
-          [DEFAULT]
-          user=${OCI_CLI_USER}
-          fingerprint=${USE_FINGERPRINT}
-          key_file=/home/runner/.oci/oci_api_key.pem
-          tenancy=${OCI_CLI_TENANCY}
-          region=${OCI_CLI_REGION:-ap-hyderabad-1}
-          EOF
-          
-          chmod 600 ~/.oci/config
+calc_fp = ""
+try:
+    res = subprocess.run(['openssl', 'rsa', '-in', key_path, '-pubout', '-outform', 'DER'], capture_output=True, check=True)
+    md5_hex = hashlib.md5(res.stdout).hexdigest()
+    calc_fp = ':'.join(md5_hex[i:i+2] for i in range(0, len(md5_hex), 2))
+except Exception as e:
+    print(f"Fingerprint calculation error: {e}")
 
-          echo "==============================================="
-          echo " Verifying OCI Key & Fingerprint"
-          echo "==============================================="
-          echo "  [*] Calculated Key Fingerprint: $CALC_FINGERPRINT"
-          echo "  [*] Active Config Fingerprint:   $USE_FINGERPRINT"
-          echo "  [+] Key fingerprint dynamically verified and active!"
+secret_fp = os.environ.get('OCI_CLI_FINGERPRINT', '').strip().strip('"').strip("'").lower()
+final_fp = calc_fp if calc_fp else secret_fp
+
+user = os.environ.get('OCI_CLI_USER', '').strip().strip('"').strip("'")
+tenancy = os.environ.get('OCI_CLI_TENANCY', '').strip().strip('"').strip("'")
+region = os.environ.get('OCI_CLI_REGION', 'ap-hyderabad-1').strip().strip('"').strip("'") or 'ap-hyderabad-1'
+
+config_path = os.path.expanduser('~/.oci/config')
+config_content = f"""[DEFAULT]
+user={user}
+fingerprint={final_fp}
+key_file={key_path}
+tenancy={tenancy}
+region={region}
+"""
+
+with open(config_path, 'w') as f:
+    f.write(config_content)
+os.chmod(config_path, 0o600)
+
+print("===============================================")
+print(" OCI Credential Verification Summary")
+print("===============================================")
+print(f"  [*] Secret Fingerprint:     {secret_fp}")
+print(f"  [*] Derived Key Fingerprint: {calc_fp}")
+print(f"  [*] Active Fingerprint Used: {final_fp}")
+print(f"  [*] User OCID:              {user[:15]}...{user[-6:] if len(user)>20 else user}")
+print(f"  [*] Tenancy OCID:           {tenancy[:15]}...{tenancy[-6:] if len(tenancy)>20 else tenancy}")
+print(f"  [*] Region:                 {region}")
+print("===============================================")
+PY
 
       - name: Execute OCI Resource Manager Apply Job
         env:
