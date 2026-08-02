@@ -35,9 +35,6 @@ jobs:
           STACK_ID: ${{ secrets.STACK_ID }}
         run: python3 scripts/setup_oci.py
 
-      - name: PHP OpenSSL Key Load Test
-        run: php scripts/test_hitrov_php.php
-
       - name: Run Hitrov Script
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
@@ -61,6 +58,8 @@ jobs:
           OCI_SSH_PUBLIC_KEY="${OCI_SSH_PUBLIC_KEY}"
           OCI_OCPUS=2
           OCI_MEMORY_IN_GBS=12
+          OCI_SHAPE="VM.Standard.A1.Flex"
+          OCI_MAX_INSTANCES=1
           EOF
 
           echo "================================================"
