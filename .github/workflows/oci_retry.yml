@@ -63,11 +63,12 @@ jobs:
               body_hash = base64.b64encode(hashlib.sha256(body_bytes).digest()).decode()
               content_len = str(len(body_bytes))
 
-              headers_to_sign = ['date', 'host', '(request-target)', 'content-length', 'content-type', 'x-content-sha256']
+              # Header order MUST match the headers= list exactly
+              headers_to_sign = ['(request-target)', 'date', 'host', 'content-length', 'content-type', 'x-content-sha256']
               signing_str = '\n'.join([
+                  f'(request-target): {method.lower()} {path}',
                   f'date: {date_str}',
                   f'host: {host}',
-                  f'(request-target): {method.lower()} {path}',
                   f'content-length: {content_len}',
                   f'content-type: application/json',
                   f'x-content-sha256: {body_hash}',
@@ -93,6 +94,7 @@ jobs:
               os.unlink(sig_in.name)
               os.unlink(sig_in.name + '.sig')
 
+              # keyId MUST be tenancy/user/fingerprint (this exact order)
               auth_header = (
                   f'Signature version="1",'
                   f'headers="{" ".join(headers_to_sign)}",'
