@@ -13,29 +13,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install OCI CLI (cached)
+      - name: Install OCI CLI
         run: |
-          OCI_CACHE="/opt/oci-cli-cache"
-          OCI_BIN="$OCI_CACHE/bin/oci"
-
-          if [ -f "$OCI_BIN" ]; then
-            echo "OCI CLI already cached at $OCI_BIN"
+          if command -v oci &> /dev/null; then
+            echo "OCI CLI already installed: $(oci --version 2>&1)"
           else
-            echo "Installing OCI CLI to $OCI_CACHE ..."
-            mkdir -p "$OCI_CACHE"
-            pip install oci-cli --quiet --target "$OCI_CACHE/lib" --no-warn-script-location 2>&1 || \
-            pip3 install oci-cli --quiet --target "$OCI_CACHE/lib" --no-warn-script-location 2>&1
-            mkdir -p "$OCI_CACHE/bin"
-            # Create a wrapper script
-            cat > "$OCI_BIN" << 'WRAPPER'
-#!/bin/bash
-export PYTHONPATH="/opt/oci-cli-cache/lib:$PYTHONPATH"
-python3 -m oci "$@"
-WRAPPER
-            chmod +x "$OCI_BIN"
+            echo "Installing OCI CLI..."
+            pip install oci-cli --quiet --no-warn-script-location || pip3 install oci-cli --quiet --no-warn-script-location
           fi
-
-          echo "$OCI_CACHE/bin" >> $GITHUB_PATH
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           echo "/usr/local/bin" >> $GITHUB_PATH
 
@@ -50,57 +35,26 @@ WRAPPER
           SUPPRESS_LABEL_WARNING: "True"
         run: |
           mkdir -p ~/.oci
-          python3 << 'PY'
-import os, subprocess, hashlib
+          printf '%s' "$OCI_CLI_KEY_CONTENT" | sed 's/\\n/\n/g' > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
 
-key_path = os.path.expanduser('~/.oci/oci_api_key.pem')
-raw_key = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip().strip('"').strip("'").replace('\\n', '\n')
-if not raw_key.endswith('\n'):
-    raw_key += '\n'
+          REGION="${OCI_CLI_REGION:-ap-hyderabad-1}"
 
-with open(key_path, 'w') as f:
-    f.write(raw_key)
-os.chmod(key_path, 0o600)
+          cat > ~/.oci/config << EOF
+          [DEFAULT]
+          user=${OCI_CLI_USER}
+          fingerprint=${OCI_CLI_FINGERPRINT}
+          key_file=${HOME}/.oci/oci_api_key.pem
+          tenancy=${OCI_CLI_TENANCY}
+          region=${REGION}
+          EOF
+          chmod 600 ~/.oci/config
 
-calc_fp = ""
-try:
-    res = subprocess.run(['openssl', 'rsa', '-in', key_path, '-pubout', '-outform', 'DER'], capture_output=True, check=True)
-    md5_hex = hashlib.md5(res.stdout).hexdigest()
-    calc_fp = ':'.join(md5_hex[i:i+2] for i in range(0, len(md5_hex), 2))
-except Exception as e:
-    print(f"Fingerprint calculation error: {e}")
-
-secret_fp = os.environ.get('OCI_CLI_FINGERPRINT', '').strip().strip('"').strip("'").lower()
-final_fp = secret_fp if secret_fp else calc_fp
-
-user = os.environ.get('OCI_CLI_USER', '').strip().strip('"').strip("'")
-tenancy = os.environ.get('OCI_CLI_TENANCY', '').strip().strip('"').strip("'")
-region = os.environ.get('OCI_CLI_REGION', 'ap-hyderabad-1').strip().strip('"').strip("'") or 'ap-hyderabad-1'
-
-config_path = os.path.expanduser('~/.oci/config')
-config_content = f"""[DEFAULT]
-user={user}
-fingerprint={final_fp}
-key_file={key_path}
-tenancy={tenancy}
-region={region}
-"""
-
-with open(config_path, 'w') as f:
-    f.write(config_content)
-os.chmod(config_path, 0o600)
-
-print("=" * 55)
-print("  OCI Credential Verification Summary")
-print("=" * 55)
-print(f"  [*] Secret Fingerprint:     {secret_fp}")
-print(f"  [*] Derived Key Fingerprint: {calc_fp}")
-print(f"  [*] Active Fingerprint Used: {final_fp}")
-print(f"  [*] User OCID:               {user[:15]}...{user[-6:] if len(user)>20 else user}")
-print(f"  [*] Tenancy OCID:            {tenancy[:15]}...{tenancy[-6:] if len(tenancy)>20 else tenancy}")
-print(f"  [*] Region:                  {region}")
-print("=" * 55)
-PY
+          echo "============================================="
+          echo "  OCI Config written successfully"
+          echo "  Fingerprint: $OCI_CLI_FINGERPRINT"
+          echo "  Region:      $REGION"
+          echo "============================================="
 
       - name: Execute OCI Resource Manager Apply Job
         env:
@@ -109,21 +63,12 @@ PY
           SUPPRESS_LABEL_WARNING: "True"
         run: |
           STACK_ID="${STACK_ID:-ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna}"
-          
-          echo "======================================================="
-          echo " Starting OCI Ampere VM Provisioning Trigger"
-          echo "======================================================="
-          
-          export PATH="$HOME/.local/bin:/usr/local/bin:/opt/oci-cli-cache/bin:$PATH"
-          OCI_BIN=$(command -v oci 2>/dev/null || echo "")
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+          OCI_BIN=$(command -v oci 2>/dev/null || echo "oci")
 
-          if [ -z "$OCI_BIN" ]; then
-            echo "  [!] oci binary not found on PATH. Trying python3 -m oci..."
-            OCI_CMD="python3 -m oci"
-          else
-            echo "  [*] Using OCI CLI at: $OCI_BIN"
-            OCI_CMD="$OCI_BIN"
-          fi
+          echo "================================================"
+          echo " Starting OCI Ampere VM Provisioning Trigger"
+          echo "================================================"
 
           attempts=0
           max_attempts=4
@@ -133,7 +78,7 @@ PY
             attempts=$((attempts+1))
             echo "  [*] Attempt $attempts/$max_attempts: Creating OCI Resource Manager Apply Job..."
 
-            JOB_OUTPUT=$($OCI_CMD resource-manager job create-apply-job \
+            JOB_OUTPUT=$($OCI_BIN resource-manager job create-apply-job \
               --stack-id "$STACK_ID" \
               --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
 
@@ -144,15 +89,14 @@ PY
               continue
             fi
 
-            JOB_ID=$(echo "$JOB_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',{}).get('id',''))" 2>/dev/null || echo "")
+            JOB_ID=$(echo "$JOB_OUTPUT" | grep -o '"id": *"[^"]*"' | head -1 | sed 's/"id": *"//;s/"//')
 
             if [ -n "$JOB_ID" ]; then
-              echo ""
-              echo "======================================================="
+              echo "================================================"
               echo "  [+] SUCCESS! OCI Job Created!"
               echo "  [+] Job ID: $JOB_ID"
               echo "  [i] Oracle Cloud Resource Manager is provisioning your VM."
-              echo "======================================================="
+              echo "================================================"
               exit 0
             fi
 
