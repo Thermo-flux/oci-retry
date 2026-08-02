@@ -56,12 +56,13 @@ jobs:
           OCI_SUBNET_ID="${OCI_SUBNET_ID}"
           OCI_IMAGE_ID="${OCI_IMAGE_ID}"
           OCI_SSH_PUBLIC_KEY="${OCI_SSH_PUBLIC_KEY}"
-          OCI_OCPUS=4
-          OCI_MEMORY_IN_GBS=24
+          OCI_OCPUS=2
+          OCI_MEMORY_IN_GBS=12
           EOF
 
           echo "================================================"
           echo " Running hitrov/oci-arm-host-capacity Script"
+          echo " (Requesting 2 OCPUs / 12 GB RAM)"
           echo "================================================"
 
           php index.php
