@@ -25,28 +25,26 @@ jobs:
           cd hitrov-app
           composer install --no-dev --quiet
 
-      - name: Configure Credentials & Run Hitrov Script
+      - name: Configure Credentials
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
           OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
           OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
           OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+          STACK_ID: ${{ secrets.STACK_ID }}
+        run: python3 scripts/setup_oci.py
+
+      - name: Run Hitrov Script
+        env:
+          OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
           OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
-          STACK_ID: ${{ secrets.STACK_ID }}
         run: |
-          mkdir -p ~/.oci
-          python3 -c "
-import os
-key = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip().strip('\"').strip(\"'\").replace('\\\\n', '\\n').replace('\\n', '\\n')
-if not key.endswith('\\n'): key += '\\n'
-path = os.path.expanduser('~/.oci/oci_api_key.pem')
-open(path, 'w').write(key)
-os.chmod(path, 0o600)
-"
-
           cd hitrov-app
 
           cat > .env << EOF
