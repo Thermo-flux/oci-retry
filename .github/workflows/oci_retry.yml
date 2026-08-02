@@ -39,21 +39,19 @@ jobs:
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
           OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
           OCI_SSH_PUBLIC_KEY: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
         run: |
-          # Read the matching fingerprint derived from the key
-          ACTIVE_FP=$(grep 'fingerprint=' ~/.oci/config | cut -d'=' -f2)
-
           cd hitrov-app
 
           cat > .env << EOF
           OCI_REGION="${OCI_CLI_REGION:-ap-hyderabad-1}"
           OCI_USER_ID="${OCI_CLI_USER}"
           OCI_TENANCY_ID="${OCI_CLI_TENANCY}"
-          OCI_KEY_FINGERPRINT="${ACTIVE_FP}"
+          OCI_KEY_FINGERPRINT="${OCI_CLI_FINGERPRINT}"
           OCI_PRIVATE_KEY_FILENAME="${HOME}/.oci/oci_api_key.pem"
           OCI_SUBNET_ID="${OCI_SUBNET_ID}"
           OCI_IMAGE_ID="${OCI_IMAGE_ID}"
@@ -64,7 +62,7 @@ jobs:
 
           echo "================================================"
           echo " Running hitrov/oci-arm-host-capacity Script"
-          echo " (Fingerprint: ${ACTIVE_FP})"
+          echo " (Fingerprint: ${OCI_CLI_FINGERPRINT})"
           echo " (Requesting 2 OCPUs / 12 GB RAM)"
           echo "================================================"
 
