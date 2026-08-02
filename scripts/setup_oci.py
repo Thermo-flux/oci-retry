@@ -7,7 +7,6 @@ import os, sys, subprocess, hashlib
 
 def main():
     key_raw = os.environ.get('OCI_CLI_KEY_CONTENT', '')
-    # Handle both literal \n and actual newlines
     key = key_raw.strip().strip('"').strip("'")
     key = key.replace('\\n', '\n')
     if not key.endswith('\n'):
@@ -15,7 +14,7 @@ def main():
 
     user     = os.environ.get('OCI_CLI_USER', '').strip().strip('"').strip("'")
     tenancy  = os.environ.get('OCI_CLI_TENANCY', '').strip().strip('"').strip("'")
-    fp       = os.environ.get('OCI_CLI_FINGERPRINT', '').strip().strip('"').strip("'")
+    secret_fp= os.environ.get('OCI_CLI_FINGERPRINT', '').strip().strip('"').strip("'")
     region   = (os.environ.get('OCI_CLI_REGION', '') or 'ap-hyderabad-1').strip().strip('"').strip("'")
 
     oci_dir  = os.path.expanduser('~/.oci')
@@ -36,13 +35,13 @@ def main():
         capture_output=True, text=True
     )
     if result.returncode == 0:
-        print("  [*] PEM key: VALID ✓")
+        print("  [*] PEM key syntax: VALID ✓")
     else:
-        print(f"  [!] PEM key: INVALID — {result.stderr.strip()}")
-        print("  [!] Check your OCI_CLI_KEY_CONTENT GitHub secret!")
+        print(f"  [!] PEM key syntax: INVALID — {result.stderr.strip()}")
         sys.exit(1)
 
-    # Compute fingerprint from key to verify it matches
+    # Compute true fingerprint from key
+    calc_fp = ""
     try:
         der = subprocess.run(
             ['openssl', 'rsa', '-in', key_path, '-pubout', '-outform', 'DER'],
@@ -50,29 +49,28 @@ def main():
         )
         md5_hex = hashlib.md5(der.stdout).hexdigest()
         calc_fp = ':'.join(md5_hex[i:i+2] for i in range(0, len(md5_hex), 2))
-        if calc_fp.lower() == fp.lower():
-            print(f"  [*] Fingerprint match: {fp} ✓")
-        else:
-            print(f"  [!] Fingerprint MISMATCH!")
-            print(f"      Secret FP : {fp}")
-            print(f"      Key FP    : {calc_fp}")
-            print("  [!] Update OCI_CLI_FINGERPRINT or OCI_CLI_KEY_CONTENT secret!")
-            sys.exit(1)
+        print(f"  [*] Derived Key Fingerprint: {calc_fp}")
     except Exception as e:
-        print(f"  [!] Fingerprint check error: {e}")
+        print(f"  [!] Fingerprint calculation error: {e}")
         sys.exit(1)
 
+    # Use derived fingerprint if secret FP doesn't match or is missing
+    active_fp = secret_fp if secret_fp else calc_fp
+    if secret_fp and secret_fp.lower() != calc_fp.lower():
+        print(f"  [!] Secret FP ({secret_fp}) != Derived FP ({calc_fp}). Using Derived Key FP ({calc_fp}).")
+        active_fp = calc_fp
+
     # Write config
-    config = f"[DEFAULT]\nuser={user}\nfingerprint={fp}\nkey_file={key_path}\ntenancy={tenancy}\nregion={region}\n"
+    config = f"[DEFAULT]\nuser={user}\nfingerprint={active_fp}\nkey_file={key_path}\ntenancy={tenancy}\nregion={region}\n"
     with open(cfg_path, 'w') as f:
         f.write(config)
     os.chmod(cfg_path, 0o600)
 
     print("=" * 55)
-    print("  OCI Credentials configured successfully")
+    print("  OCI Credentials Configured Successfully")
     print(f"  Region:      {region}")
-    print(f"  Fingerprint: {fp}")
-    print(f"  User:        {user[:20]}...{user[-6:]}")
+    print(f"  Fingerprint: {active_fp}")
+    print(f"  User:        {user[:15]}...{user[-6:] if len(user)>20 else user}")
     print("=" * 55)
 
 if __name__ == '__main__':
