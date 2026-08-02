@@ -35,6 +35,15 @@ jobs:
           STACK_ID: ${{ secrets.STACK_ID }}
         run: python3 scripts/setup_oci.py
 
+      - name: Test OCI Authentication Diagnostic
+        env:
+          OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
+          OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
+          OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
+          OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
+          OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
+        run: python3 scripts/test_oci_auth.py
+
       - name: Run Hitrov Script
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
