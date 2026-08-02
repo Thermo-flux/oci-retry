@@ -32,8 +32,27 @@ jobs:
         run: |
           mkdir -p ~/.oci
           
-          # Write private key with preserved newlines
-          printf "%s\n" "$OCI_CLI_KEY_CONTENT" > ~/.oci/oci_api_key.pem
+          # Python script to reconstruct & format PEM key flawlessly regardless of newline stripping
+          python3 -c "
+import os, re
+
+raw = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip()
+header_match = re.search(r'-----BEGIN [^-]+-----', raw)
+footer_match = re.search(r'-----END [^-]+-----', raw)
+
+if header_match and footer_match:
+    header = header_match.group(0)
+    footer = footer_match.group(0)
+    body = raw[header_match.end():footer_match.start()].replace(' ', '').replace('\n', '').replace('\r', '')
+    wrapped_body = '\n'.join(body[i:i+64] for i in range(0, len(body), 64))
+    pem_text = f'{header}\n{wrapped_body}\n{footer}\n'
+else:
+    pem_text = raw + '\n'
+
+key_path = os.path.expanduser('~/.oci/oci_api_key.pem')
+with open(key_path, 'w') as f:
+    f.write(pem_text)
+"
           chmod 600 ~/.oci/oci_api_key.pem
 
           # Write OCI config file
