@@ -15,13 +15,10 @@ jobs:
 
       - name: Install OCI CLI
         run: |
-          if ! command -v oci &> /dev/null && [ ! -f /home/runner/bin/oci ]; then
-            sudo apt-get update
-            sudo apt-get install -y python3-pip curl jq
-            bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- --accept-all-defaults
-            echo "/home/runner/bin" >> $GITHUB_PATH
+          if ! command -v oci &> /dev/null; then
+            pip install oci-cli --quiet || pip3 install oci-cli --quiet
           else
-            echo "OCI CLI is already installed on this runner!"
+            echo "OCI CLI is already installed!"
           fi
 
       - name: Configure OCI CLI Credentials
