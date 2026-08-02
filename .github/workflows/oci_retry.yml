@@ -54,49 +54,45 @@ jobs:
           STACK_ID="${STACK_ID:-ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna}"
           
           echo "==============================================="
-          echo " Starting OCI Ampere VM Provisioning Retry"
+          echo " Starting OCI Ampere VM Provisioning Trigger"
           echo "==============================================="
           
-          JOB_OUTPUT=$(/home/runner/bin/oci resource-manager job create-apply-job \
-            --stack-id "$STACK_ID" \
-            --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
-          
-          JOB_ID=$(echo "$JOB_OUTPUT" | jq -r '.data.id // empty' 2>/dev/null || echo "")
+          attempts=0
+          max_attempts=4
+          wait_sec=5
 
-          if [ -z "$JOB_ID" ]; then
-            if [[ "$JOB_OUTPUT" == *"TooManyRequests"* ]]; then
-              echo "  [!] Oracle API Rate Limit reached (HTTP 429: TooManyRequests)."
-              echo "  [i] The rate limit window will reset before the next scheduled run in 15 minutes."
+          while [ $attempts -lt $max_attempts ]; do
+            attempts=$((attempts+1))
+            echo "  [*] Attempt $attempts/$max_attempts: Creating OCI Resource Manager Apply Job..."
+
+            JOB_OUTPUT=$(/home/runner/bin/oci resource-manager job create-apply-job \
+              --stack-id "$STACK_ID" \
+              --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
+
+            if echo "$JOB_OUTPUT" | grep -q "TooManyRequests"; then
+              echo "  [!] Rate limited by OCI API (HTTP 429). Retrying in ${wait_sec}s..."
+              sleep $wait_sec
+              wait_sec=$((wait_sec * 2))
+              continue
+            fi
+
+            JOB_ID=$(echo "$JOB_OUTPUT" | jq -r '.data.id // empty' 2>/dev/null || echo "")
+
+            if [ -n "$JOB_ID" ]; then
+              echo ""
+              echo "==============================================="
+              echo "  [+] SUCCESS! OCI Job Created!"
+              echo "  [+] Job ID: $JOB_ID"
+              echo "  [i] Oracle Cloud Resource Manager is processing your VM creation asynchronously in the background."
+              echo "==============================================="
               exit 0
             fi
-            echo "  [!] Failed to trigger job. OCI response output:"
+
+            echo "  [!] OCI API returned an unexpected response:"
             echo "$JOB_OUTPUT"
             exit 1
-          fi
-
-          echo "  [+] Job created (ID: $JOB_ID). Monitoring status..."
-
-          while true; do
-            sleep 15
-            JOB_STATE=$(/home/runner/bin/oci resource-manager job get --job-id "$JOB_ID" --query 'data."lifecycle-state"' --raw-output 2>/dev/null || echo "UNKNOWN")
-
-            case "$JOB_STATE" in
-              "SUCCEEDED")
-                echo ""
-                echo "==============================================="
-                echo " SUCCESS! Your Ampere VM has been provisioned!"
-                echo "==============================================="
-                exit 0
-                ;;
-              "FAILED"|"CANCELED")
-                echo "  [-] Job ended with status: $JOB_STATE (Out of capacity)."
-                exit 0
-                ;;
-              "IN_PROGRESS"|"ACCEPTED")
-                echo "  [...] Job still running ($JOB_STATE). Waiting..."
-                ;;
-              *)
-                echo "  [?] Status: '$JOB_STATE'. Checking again..."
-                ;;
-            esac
           done
+
+          echo "  [!] Exceeded max retries due to rate limiting (HTTP 429). Will try again next scheduled run."
+          exit 0
+
