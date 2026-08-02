@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
 setup_oci.py — writes ~/.oci/config and ~/.oci/oci_api_key.pem
-from environment variables, then validates the key.
+from environment variables, then validates and converts key to PKCS#1 RSA format.
 """
 import os, sys, subprocess, hashlib
 
 def main():
     key_raw = os.environ.get('OCI_CLI_KEY_CONTENT', '')
-    # Strip quotes, carriage returns (\r), and unescape literal \n
     key = key_raw.strip().strip('"').strip("'")
     key = key.replace('\r', '').replace('\\n', '\n')
     if not key.endswith('\n'):
@@ -28,6 +27,14 @@ def main():
     with open(key_path, 'wb') as f:
         f.write(key.encode('utf-8'))
     os.chmod(key_path, 0o600)
+
+    # Convert key to traditional PKCS#1 RSA format for PHP openssl compatibility
+    try:
+        subprocess.run(['openssl', 'rsa', '-in', key_path, '-out', key_path], capture_output=True, check=True)
+        os.chmod(key_path, 0o600)
+        print("  [*] Converted key to PKCS#1 RSA format for PHP openssl ✓")
+    except Exception as e:
+        print(f"  [!] OpenSSL RSA conversion notice: {e}")
 
     # Validate key syntax
     res = subprocess.run(['openssl', 'rsa', '-in', key_path, '-check', '-noout'], capture_output=True, text=True)
