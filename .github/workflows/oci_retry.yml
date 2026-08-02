@@ -31,31 +31,9 @@ jobs:
           SUPPRESS_LABEL_WARNING: "True"
         run: |
           mkdir -p ~/.oci
-          
-          # Python script to reconstruct & format PEM key flawlessly regardless of newline stripping
-          python3 -c "
-import os, re
-
-raw = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip()
-header_match = re.search(r'-----BEGIN [^-]+-----', raw)
-footer_match = re.search(r'-----END [^-]+-----', raw)
-
-if header_match and footer_match:
-    header = header_match.group(0)
-    footer = footer_match.group(0)
-    body = raw[header_match.end():footer_match.start()].replace(' ', '').replace('\n', '').replace('\r', '')
-    wrapped_body = '\n'.join(body[i:i+64] for i in range(0, len(body), 64))
-    pem_text = f'{header}\n{wrapped_body}\n{footer}\n'
-else:
-    pem_text = raw + '\n'
-
-key_path = os.path.expanduser('~/.oci/oci_api_key.pem')
-with open(key_path, 'w') as f:
-    f.write(pem_text)
-"
+          python3 -c "import os, re; raw = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip(); h = re.search(r'-----BEGIN [^-]+-----', raw); f = re.search(r'-----END [^-]+-----', raw); b = raw[h.end():f.start()].replace(' ','').replace('\n','').replace('\r','') if (h and f) else ''; txt = (f'{h.group(0)}\n' + '\n'.join(b[i:i+64] for i in range(0, len(b), 64)) + f'\n{f.group(0)}\n') if (h and f) else (raw + '\n'); open(os.path.expanduser('~/.oci/oci_api_key.pem'), 'w').write(txt)"
           chmod 600 ~/.oci/oci_api_key.pem
 
-          # Write OCI config file
           cat << EOF > ~/.oci/config
           [DEFAULT]
           user=${OCI_CLI_USER}
@@ -79,7 +57,6 @@ with open(key_path, 'w') as f:
           echo " Starting OCI Ampere VM Provisioning Retry"
           echo "==============================================="
           
-          # Create apply job and capture output
           JOB_OUTPUT=$(/home/runner/bin/oci resource-manager job create-apply-job \
             --stack-id "$STACK_ID" \
             --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
