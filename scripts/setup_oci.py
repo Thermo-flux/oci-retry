@@ -44,7 +44,8 @@ def main():
         print(f"  [!] Fingerprint calculation error: {e}")
         sys.exit(1)
 
-    active_fp = secret_fp if secret_fp else calc_fp
+    # Always use derived fingerprint matching the key file
+    active_fp = calc_fp
 
     # Write config
     config = f"[DEFAULT]\nuser={user}\nfingerprint={active_fp}\nkey_file={key_path}\ntenancy={tenancy}\nregion={region}\n"
@@ -55,9 +56,8 @@ def main():
     print("=======================================================")
     print("  OCI Credential Verification Summary")
     print("=======================================================")
-    print(f"  [*] Secret Fingerprint:  {secret_fp}")
     print(f"  [*] Key Fingerprint:     {calc_fp}")
-    print(f"  [*] Config Fingerprint:  {active_fp}")
+    print(f"  [*] Active Fingerprint:  {active_fp}")
     print(f"  [*] Region:              {region}")
     print(f"  [*] User OCID:           {user[:15]}...{user[-6:] if len(user)>20 else user}")
     print("=======================================================")
