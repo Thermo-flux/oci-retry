@@ -3,12 +3,13 @@
 setup_oci.py — writes ~/.oci/config and ~/.oci/oci_api_key.pem
 from environment variables, then validates the key.
 """
-import os, sys, subprocess, hashlib, re
+import os, sys, subprocess, hashlib
 
 def main():
     key_raw = os.environ.get('OCI_CLI_KEY_CONTENT', '')
+    # Strip quotes, carriage returns (\r), and unescape literal \n
     key = key_raw.strip().strip('"').strip("'")
-    key = key.replace('\\n', '\n')
+    key = key.replace('\r', '').replace('\\n', '\n')
     if not key.endswith('\n'):
         key += '\n'
 
@@ -23,9 +24,9 @@ def main():
 
     os.makedirs(oci_dir, exist_ok=True)
 
-    # Write PEM key
-    with open(key_path, 'w') as f:
-        f.write(key)
+    # Write PEM key with clean Linux \n line endings
+    with open(key_path, 'wb') as f:
+        f.write(key.encode('utf-8'))
     os.chmod(key_path, 0o600)
 
     # Validate key syntax
