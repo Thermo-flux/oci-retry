@@ -38,45 +38,33 @@ jobs:
           SUPPRESS_LABEL_WARNING: "True"
         run: |
           STACK_ID="${STACK_ID:-ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna}"
+          export PATH="$HOME/.local/bin:$PATH"
           
           echo "================================================"
           echo " Starting OCI Ampere VM Provisioning Trigger"
           echo "================================================"
 
-          attempts=0
-          max_attempts=4
-          wait_sec=5
+          echo "  [*] Attempting OCI Resource Manager Apply Job..."
 
-          while [ $attempts -lt $max_attempts ]; do
-            attempts=$((attempts+1))
-            echo "  [*] Attempt $attempts/$max_attempts: Creating OCI Resource Manager Apply Job..."
+          JOB_OUTPUT=$(oci resource-manager job create-apply-job \
+            --stack-id "$STACK_ID" \
+            --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
 
-            JOB_OUTPUT=$(oci resource-manager job create-apply-job \
-              --stack-id "$STACK_ID" \
-              --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
+          JOB_ID=$(echo "$JOB_OUTPUT" | grep -o '"id": *"[^"]*"' | head -1 | sed 's/"id": *"//;s/"//')
 
-            if echo "$JOB_OUTPUT" | grep -q "TooManyRequests"; then
-              echo "  [!] Rate limited (HTTP 429). Retrying in ${wait_sec}s..."
-              sleep $wait_sec
-              wait_sec=$((wait_sec * 2))
-              continue
-            fi
+          if [ -n "$JOB_ID" ]; then
+            echo "================================================"
+            echo "  [+] SUCCESS! OCI Job Created!"
+            echo "  [+] Job ID: $JOB_ID"
+            echo "  [i] Oracle Cloud Resource Manager is provisioning your VM."
+            echo "================================================"
+            exit 0
+          fi
 
-            JOB_ID=$(echo "$JOB_OUTPUT" | grep -o '"id": *"[^"]*"' | head -1 | sed 's/"id": *"//;s/"//')
+          if echo "$JOB_OUTPUT" | grep -q "TooManyRequests"; then
+            echo "  [!] Rate limited by OCI API (HTTP 429). Will retry on next 5-min scheduled run."
+            exit 0
+          fi
 
-            if [ -n "$JOB_ID" ]; then
-              echo "================================================"
-              echo "  [+] SUCCESS! OCI Job Created!"
-              echo "  [+] Job ID: $JOB_ID"
-              echo "  [i] Oracle Cloud Resource Manager is provisioning your VM."
-              echo "================================================"
-              exit 0
-            fi
-
-            echo "  [!] OCI API returned an unexpected response:"
-            echo "$JOB_OUTPUT"
-            exit 1
-          done
-
-          echo "  [!] Exceeded max retries. Will retry next scheduled run."
-          exit 0
+          echo "  [!] OCI API Response:"
+          echo "$JOB_OUTPUT"
