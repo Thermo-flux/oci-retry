@@ -52,7 +52,7 @@ jobs:
               print(f"Fingerprint calculation error: {e}")
 
           secret_fp = os.environ.get('OCI_CLI_FINGERPRINT', '').strip().strip('"').strip("'").lower()
-          final_fp = calc_fp if calc_fp else secret_fp
+          final_fp = secret_fp if secret_fp else calc_fp
 
           user = os.environ.get('OCI_CLI_USER', '').strip().strip('"').strip("'")
           tenancy = os.environ.get('OCI_CLI_TENANCY', '').strip().strip('"').strip("'")
