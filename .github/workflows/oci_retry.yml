@@ -3,11 +3,12 @@ name: OCI ARM Host Capacity (Hitrov)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '0 */6 * * *'
 
 jobs:
   run-hitrov:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
@@ -35,7 +36,7 @@ jobs:
           STACK_ID: ${{ secrets.STACK_ID }}
         run: python3 scripts/setup_oci.py
 
-      - name: Run Hitrov Script
+      - name: Run Hitrov Script Continuous Loop (72 Retries over 6 Hours)
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
@@ -63,9 +64,23 @@ jobs:
           EOF
 
           echo "================================================"
-          echo " Running hitrov/oci-arm-host-capacity Script"
-          echo " (Fingerprint: ${OCI_CLI_FINGERPRINT})"
-          echo " (Requesting 2 OCPUs / 12 GB RAM)"
+          echo " Starting Continuous 6-Hour Loop (Retrying every 5 min)"
+          echo " (Requesting 2 OCPUs / 12 GB RAM in Hyderabad)"
           echo "================================================"
 
-          php index.php
+          for i in {1..72}; do
+            echo ""
+            echo "--- Attempt $i of 72 [$(date -u +'%Y-%m-%d %H:%M:%S UTC')] ---"
+            
+            output=$(php index.php 2>&1)
+            echo "$output"
+
+            # If instance was successfully created or already exists, stop the loop cleanly
+            if echo "$output" | grep -iq "Instance created\|Instance already exists"; then
+              echo "🎉 SUCCESS: Instance created or already exists! Stopping loop."
+              exit 0
+            fi
+
+            echo "Sleeping 5 minutes before next attempt..."
+            sleep 300
+          done
