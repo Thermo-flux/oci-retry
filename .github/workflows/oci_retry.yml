@@ -17,9 +17,9 @@ jobs:
         run: |
           if ! command -v oci &> /dev/null; then
             pip install oci-cli --quiet || pip3 install oci-cli --quiet
-          else
-            echo "OCI CLI is already installed!"
           fi
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "/usr/local/bin" >> $GITHUB_PATH
 
       - name: Configure OCI CLI Credentials
         env:
@@ -104,7 +104,8 @@ jobs:
             attempts=$((attempts+1))
             echo "  [*] Attempt $attempts/$max_attempts: Creating OCI Resource Manager Apply Job..."
 
-            OCI_BIN=$(command -v oci || echo "/home/runner/bin/oci")
+            export PATH=$PATH:$HOME/.local/bin:/usr/local/bin:/home/runner/bin
+            OCI_BIN=$(command -v oci || echo "oci")
             JOB_OUTPUT=$($OCI_BIN resource-manager job create-apply-job \
               --stack-id "$STACK_ID" \
               --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
