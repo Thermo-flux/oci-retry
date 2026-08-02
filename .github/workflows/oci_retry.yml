@@ -31,7 +31,7 @@ jobs:
           SUPPRESS_LABEL_WARNING: "True"
         run: |
           mkdir -p ~/.oci
-          python3 -c "import os, re; raw = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip(); h = re.search(r'-----BEGIN [^-]+-----', raw); f = re.search(r'-----END [^-]+-----', raw); b = raw[h.end():f.start()].replace(' ','').replace('\n','').replace('\r','') if (h and f) else ''; txt = (f'{h.group(0)}\n' + '\n'.join(b[i:i+64] for i in range(0, len(b), 64)) + f'\n{f.group(0)}\n') if (h and f) else (raw + '\n'); open(os.path.expanduser('~/.oci/oci_api_key.pem'), 'w').write(txt)"
+          python3 -c "import os; raw = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip().replace('\\\\n', '\n').replace('\\n', '\n'); txt = raw + ('\n' if not raw.endswith('\n') else ''); open(os.path.expanduser('~/.oci/oci_api_key.pem'), 'w').write(txt)"
           chmod 600 ~/.oci/oci_api_key.pem
 
           cat << EOF > ~/.oci/config
