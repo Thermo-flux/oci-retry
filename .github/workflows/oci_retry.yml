@@ -45,6 +45,18 @@ jobs:
           
           chmod 600 ~/.oci/config
 
+          echo "==============================================="
+          echo " Verifying OCI Key & Fingerprint"
+          echo "==============================================="
+          CALC_FINGERPRINT=$(openssl rsa -in ~/.oci/oci_api_key.pem -pubout -outform DER 2>/dev/null | openssl md5 -c | sed -e 's/(stdin)= //' -e 's/^stdin=//')
+          echo "  [*] Computed Key Fingerprint: $CALC_FINGERPRINT"
+          echo "  [*] Configured Fingerprint:   ${OCI_CLI_FINGERPRINT}"
+          if [ "$CALC_FINGERPRINT" != "${OCI_CLI_FINGERPRINT}" ]; then
+            echo "  [!] WARNING: Private key fingerprint does NOT match OCI_CLI_FINGERPRINT!"
+          else
+            echo "  [+] Key fingerprint matches configured fingerprint!"
+          fi
+
       - name: Execute OCI Resource Manager Apply Job
         env:
           STACK_ID: ${{ secrets.STACK_ID }}
