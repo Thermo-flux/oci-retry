@@ -13,127 +13,156 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install OCI CLI
-        run: |
-          if ! command -v oci &> /dev/null; then
-            pip install oci-cli --quiet || pip3 install oci-cli --quiet
-          fi
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-          echo "/usr/local/bin" >> $GITHUB_PATH
-
-      - name: Configure OCI CLI Credentials
+      - name: Trigger OCI Resource Manager Apply Job
         env:
           OCI_CLI_USER: ${{ secrets.OCI_CLI_USER }}
           OCI_CLI_TENANCY: ${{ secrets.OCI_CLI_TENANCY }}
           OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CLI_FINGERPRINT }}
           OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CLI_KEY_CONTENT }}
           OCI_CLI_REGION: ${{ secrets.OCI_CLI_REGION }}
-          OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
-          SUPPRESS_LABEL_WARNING: "True"
+          STACK_ID: ${{ secrets.STACK_ID }}
         run: |
-          mkdir -p ~/.oci
-          python3 - << 'PY'
-          import os, subprocess, hashlib
+          python3 - << 'PYEOF'
+          import os, sys, json, hashlib, base64, datetime, urllib.request, urllib.error
 
-          key_path = os.path.expanduser('~/.oci/oci_api_key.pem')
-          raw_key = os.environ.get('OCI_CLI_KEY_CONTENT', '').strip().strip('"').strip("'").replace('\\\\n', '\n').replace('\\n', '\n')
+          # ── Load secrets ──────────────────────────────────────────────────────────
+          def clean(v):
+              return v.strip().strip('"').strip("'") if v else ''
+
+          user      = clean(os.environ.get('OCI_CLI_USER', ''))
+          tenancy   = clean(os.environ.get('OCI_CLI_TENANCY', ''))
+          fingerprint = clean(os.environ.get('OCI_CLI_FINGERPRINT', '')).lower()
+          region    = clean(os.environ.get('OCI_CLI_REGION', '')) or 'ap-hyderabad-1'
+          stack_id  = clean(os.environ.get('STACK_ID', '')) or \
+                      'ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna'
+
+          raw_key = os.environ.get('OCI_CLI_KEY_CONTENT', '') \
+                      .strip().strip('"').strip("'") \
+                      .replace('\\n', '\n').replace('\\\\n', '\n')
           if not raw_key.endswith('\n'):
               raw_key += '\n'
 
-          with open(key_path, 'w') as f:
-              f.write(raw_key)
-          os.chmod(key_path, 0o600)
+          # Write key to temp file for openssl signing
+          import tempfile, subprocess
+          key_file = tempfile.NamedTemporaryFile(delete=False, suffix='.pem', mode='w')
+          key_file.write(raw_key)
+          key_file.close()
+          os.chmod(key_file.name, 0o600)
 
-          calc_fp = ""
-          try:
-              res = subprocess.run(['openssl', 'rsa', '-in', key_path, '-pubout', '-outform', 'DER'], capture_output=True, check=True)
-              md5_hex = hashlib.md5(res.stdout).hexdigest()
-              calc_fp = ':'.join(md5_hex[i:i+2] for i in range(0, len(md5_hex), 2))
-          except Exception as e:
-              print(f"Fingerprint calculation error: {e}")
+          print("=" * 55)
+          print("  OCI Ampere VM Provisioning Trigger")
+          print("=" * 55)
+          print(f"  [*] Region:      {region}")
+          print(f"  [*] Fingerprint: {fingerprint}")
+          print(f"  [*] Stack ID:    {stack_id[:40]}...")
+          print("=" * 55)
 
-          secret_fp = os.environ.get('OCI_CLI_FINGERPRINT', '').strip().strip('"').strip("'").lower()
-          final_fp = secret_fp if secret_fp else calc_fp
+          # ── OCI HTTP Signature helper ─────────────────────────────────────────────
+          def sign_request(method, host, path, body_bytes, key_path, fp, user_ocid, tenancy_ocid):
+              date_str = datetime.datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
+              body_hash = base64.b64encode(hashlib.sha256(body_bytes).digest()).decode()
+              content_len = str(len(body_bytes))
 
-          user = os.environ.get('OCI_CLI_USER', '').strip().strip('"').strip("'")
-          tenancy = os.environ.get('OCI_CLI_TENANCY', '').strip().strip('"').strip("'")
-          region = os.environ.get('OCI_CLI_REGION', 'ap-hyderabad-1').strip().strip('"').strip("'") or 'ap-hyderabad-1'
+              headers_to_sign = ['date', 'host', '(request-target)', 'content-length', 'content-type', 'x-content-sha256']
+              signing_str = '\n'.join([
+                  f'date: {date_str}',
+                  f'host: {host}',
+                  f'(request-target): {method.lower()} {path}',
+                  f'content-length: {content_len}',
+                  f'content-type: application/json',
+                  f'x-content-sha256: {body_hash}',
+              ])
 
-          config_path = os.path.expanduser('~/.oci/config')
-          config_content = f"""[DEFAULT]
-          user={user}
-          fingerprint={final_fp}
-          key_file={key_path}
-          tenancy={tenancy}
-          region={region}
-          """
+              # Sign with openssl
+              import tempfile as tf
+              sig_in = tf.NamedTemporaryFile(delete=False, mode='w')
+              sig_in.write(signing_str)
+              sig_in.close()
 
-          with open(config_path, 'w') as f:
-              f.write(config_content)
-          os.chmod(config_path, 0o600)
+              result = subprocess.run(
+                  ['openssl', 'dgst', '-sha256', '-sign', key_path, '-out', sig_in.name + '.sig', sig_in.name],
+                  capture_output=True
+              )
+              if result.returncode != 0:
+                  print(f"  [!] openssl sign error: {result.stderr.decode()}")
+                  sys.exit(1)
 
-          print("===============================================")
-          print(" OCI Credential Verification Summary")
-          print("===============================================")
-          print(f"  [*] Secret Fingerprint:     {secret_fp}")
-          print(f"  [*] Derived Key Fingerprint: {calc_fp}")
-          print(f"  [*] Active Fingerprint Used: {final_fp}")
-          print(f"  [*] User OCID:              {user[:15]}...{user[-6:] if len(user)>20 else user}")
-          print(f"  [*] Tenancy OCID:           {tenancy[:15]}...{tenancy[-6:] if len(tenancy)>20 else tenancy}")
-          print(f"  [*] Region:                 {region}")
-          print("===============================================")
-          PY
+              with open(sig_in.name + '.sig', 'rb') as f:
+                  signature = base64.b64encode(f.read()).decode()
 
-      - name: Execute OCI Resource Manager Apply Job
-        env:
-          STACK_ID: ${{ secrets.STACK_ID }}
-          OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING: "True"
-          SUPPRESS_LABEL_WARNING: "True"
-        run: |
-          STACK_ID="${STACK_ID:-ocid1.ormstack.oc1.ap-hyderabad-1.amaaaaaau77coliauyefjo4yf2ogbtlkpua4gsz5ncpe5fo4mtt2cjeumcna}"
-          
-          echo "==============================================="
-          echo " Starting OCI Ampere VM Provisioning Trigger"
-          echo "==============================================="
-          
-          attempts=0
-          max_attempts=4
-          wait_sec=5
+              os.unlink(sig_in.name)
+              os.unlink(sig_in.name + '.sig')
 
-          while [ $attempts -lt $max_attempts ]; do
-            attempts=$((attempts+1))
-            echo "  [*] Attempt $attempts/$max_attempts: Creating OCI Resource Manager Apply Job..."
+              auth_header = (
+                  f'Signature version="1",'
+                  f'headers="{" ".join(headers_to_sign)}",'
+                  f'keyId="{tenancy_ocid}/{user_ocid}/{fp}",'
+                  f'algorithm="rsa-sha256",'
+                  f'signature="{signature}"'
+              )
 
-            export PATH=$PATH:$HOME/.local/bin:/usr/local/bin:/home/runner/bin
-            OCI_BIN=$(command -v oci || echo "oci")
-            JOB_OUTPUT=$($OCI_BIN resource-manager job create-apply-job \
-              --stack-id "$STACK_ID" \
-              --execution-plan-strategy "AUTO_APPROVED" 2>&1 || true)
+              return {
+                  'date': date_str,
+                  'host': host,
+                  'content-type': 'application/json',
+                  'content-length': content_len,
+                  'x-content-sha256': body_hash,
+                  'authorization': auth_header,
+              }
 
-            if echo "$JOB_OUTPUT" | grep -q "TooManyRequests"; then
-              echo "  [!] Rate limited by OCI API (HTTP 429). Retrying in ${wait_sec}s..."
-              sleep $wait_sec
-              wait_sec=$((wait_sec * 2))
-              continue
-            fi
+          # ── Make the API call ─────────────────────────────────────────────────────
+          host = f'resourcemanager.{region}.oci.oraclecloud.com'
+          path = '/20180917/jobs'
+          body = json.dumps({
+              'stackId': stack_id,
+              'jobOperationDetails': {
+                  'operation': 'APPLY',
+                  'executionPlanStrategy': 'AUTO_APPROVED'
+              }
+          }).encode()
 
-            JOB_ID=$(echo "$JOB_OUTPUT" | jq -r '.data.id // empty' 2>/dev/null || echo "")
+          max_attempts = 4
+          wait_sec = 5
 
-            if [ -n "$JOB_ID" ]; then
-              echo ""
-              echo "==============================================="
-              echo "  [+] SUCCESS! OCI Job Created!"
-              echo "  [+] Job ID: $JOB_ID"
-              echo "  [i] Oracle Cloud Resource Manager is processing your VM creation asynchronously in the background."
-              echo "==============================================="
-              exit 0
-            fi
+          for attempt in range(1, max_attempts + 1):
+              print(f"\n  [*] Attempt {attempt}/{max_attempts}: Calling OCI Resource Manager API...")
 
-            echo "  [!] OCI API returned an unexpected response:"
-            echo "$JOB_OUTPUT"
-            exit 1
-          done
+              try:
+                  headers = sign_request('POST', host, path, body, key_file.name, fingerprint, user, tenancy)
+                  req = urllib.request.Request(
+                      f'https://{host}{path}',
+                      data=body,
+                      headers=headers,
+                      method='POST'
+                  )
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      resp_body = json.loads(resp.read().decode())
+                      job_id = resp_body.get('data', {}).get('id', '')
+                      if job_id:
+                          print(f"\n  [+] SUCCESS! OCI Job Created!")
+                          print(f"  [+] Job ID: {job_id}")
+                          print(f"  [i] Oracle Cloud Resource Manager is provisioning your VM in the background.")
+                          print("=" * 55)
+                          sys.exit(0)
 
-          echo "  [!] Exceeded max retries due to rate limiting (HTTP 429). Will try again next scheduled run."
-          exit 0
+              except urllib.error.HTTPError as e:
+                  body_err = e.read().decode()
+                  if 'TooManyRequests' in body_err or e.code == 429:
+                      print(f"  [!] Rate limited (HTTP 429). Retrying in {wait_sec}s...")
+                      import time; time.sleep(wait_sec)
+                      wait_sec *= 2
+                      continue
+                  elif e.code == 409:
+                      print(f"  [!] Conflict (HTTP 409) — a job may already be running. Treating as success.")
+                      print(f"  [i] Response: {body_err[:300]}")
+                      sys.exit(0)
+                  else:
+                      print(f"  [!] HTTP Error {e.code}: {body_err[:500]}")
+                      sys.exit(1)
+              except Exception as ex:
+                  print(f"  [!] Unexpected error: {ex}")
+                  sys.exit(1)
 
+          print("  [!] Exceeded max retries. Will retry next scheduled run.")
+          sys.exit(0)
+          PYEOF
