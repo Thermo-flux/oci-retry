@@ -60,11 +60,12 @@ jobs:
           OCI_MEMORY_IN_GBS=12
           OCI_SHAPE="VM.Standard.A1.Flex"
           OCI_MAX_INSTANCES=1
+          OCI_BOOT_VOLUME_SIZE_IN_GBS=150
           EOF
 
           echo "================================================"
-          echo " Running hitrov/oci-arm-host-capacity (Single Check)"
-          echo " (Requesting 2 OCPUs / 12 GB RAM in Hyderabad)"
+          echo " Running hitrov/oci-arm-host-capacity"
+          echo " (Requesting 2 OCPUs / 12 GB RAM / 150 GB Disk)"
           echo "================================================"
 
           php index.php
